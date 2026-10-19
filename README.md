@@ -1,4 +1,4 @@
-# Informing Patient Care with Study Data
+# CDS Hook for SGLT2 Recommendation
 
 A learning project working toward a clinical decision support tool: software that reads a patient's record from an EHR, compares it with current research and guidelines, and suggests treatments a physician may want to consider.
 
