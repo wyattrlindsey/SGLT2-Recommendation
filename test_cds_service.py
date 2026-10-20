@@ -213,3 +213,53 @@ def test_wrong_hook_400(hook):
     body = request_body(prefetch([T2D]))
     body["hook"] = hook
     assert client.post(URL, json=body).status_code == 400
+
+
+# ---------------------------------------------------------------- evidence (Phase 5)
+
+EVIDENCE_URL = f"/evidence/{cds_service.SERVICE_ID}"
+
+
+def test_evidence_matches_card_for_recommend():
+    pf = prefetch([T2D, CKD3], [egfr(41, 30)])
+    card = client.post(URL, json=request_body(pf)).json()["cards"][0]
+    r = client.post(EVIDENCE_URL, json={"prefetch": pf})
+    assert r.status_code == 200
+    ev = r.json()
+    assert ev["status"] == "RECOMMEND"
+    # Same reasons the card's detail lists, line for line
+    assert ev["reasons"] and all(f"- {reason}" in card["detail"] for reason in ev["reasons"])
+    assert ev["facts"]["latest_egfr"][0] == 41
+    assert ev["as_of"] == date.today().isoformat()
+    assert ev["reviewed"] is cds_service.CLINICIAN_REVIEWED
+
+
+@pytest.mark.parametrize("conditions, egfrs, expected, card_word", [
+    ([T2D, CKD3], [egfr(41, 30)], "RECOMMEND", "Consider"),
+    ([T2D, CKD3], [egfr(41, 800)], "INSUFFICIENT_DATA", "unclear"),
+    ([T2D], [egfr(95, 30)], "NOT_APPLICABLE", None),
+])
+def test_evidence_status_agrees_with_hook(conditions, egfrs, expected, card_word):
+    pf = prefetch(conditions, egfrs)
+    cards = client.post(URL, json=request_body(pf)).json()["cards"]
+    ev = client.post(EVIDENCE_URL, json={"prefetch": pf}).json()
+    assert ev["status"] == expected
+    if card_word is None:
+        assert cards == []
+    else:
+        assert len(cards) == 1 and card_word in cards[0]["summary"]
+
+
+def test_evidence_paged_prefetch_is_422_not_partial():
+    pf = prefetch([T2D, CKD3], [egfr(41, 30)])
+    pf["egfr"] = bundle(egfr(41, 30), next_url="http://ehr.example/fhir?page=2")
+    r = client.post(EVIDENCE_URL, json={"prefetch": pf})
+    assert r.status_code == 422 and "Incomplete" in r.json()["detail"]
+
+
+def test_evidence_missing_prefetch_is_422():
+    assert client.post(EVIDENCE_URL, json={}).status_code == 422
+
+
+def test_evidence_unknown_service_404():
+    assert client.post("/evidence/nope", json={"prefetch": {}}).status_code == 404

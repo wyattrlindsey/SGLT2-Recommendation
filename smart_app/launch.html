@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SGLT2 evidence: launching</title>
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient@2.6.3/build/fhir-client.min.js"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+  <p>Launching…</p>
+  <script>
+    // Step 1 of an EHR launch. The EHR (here, the SMART launcher) opened this page
+    // with ?iss=<FHIR base>&launch=<opaque context>. authorize() reads both, finds the
+    // authorization server in iss/.well-known/smart-configuration, and redirects there.
+    FHIR.oauth2.authorize({
+      clientId: APP_CONFIG.clientId,
+      scope: APP_CONFIG.scope,
+      redirectUri: "index.html"
+    });
+  </script>
+</body>
+</html>
