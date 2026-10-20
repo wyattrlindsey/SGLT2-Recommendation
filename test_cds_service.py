@@ -4,6 +4,7 @@ These use hand-built FHIR resources, so they exercise the real
 guideline.build_patient_data() and evaluate() from Phase 3. No server needed.
 """
 from datetime import date, timedelta
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -263,3 +264,39 @@ def test_evidence_missing_prefetch_is_422():
 
 def test_evidence_unknown_service_404():
     assert client.post("/evidence/nope", json={"prefetch": {}}).status_code == 404
+
+
+# ---------------------------------------------------------------- evidence link (Phase 5, S1-S2)
+
+
+def evidence_links(card):
+    return [l for l in card["links"] if l["label"] == cds_service.EVIDENCE_LABEL]
+
+
+@pytest.mark.parametrize("egfrs", [[egfr(41, 30)], [egfr(41, 800)]], ids=["recommend", "insufficient"])
+def test_card_has_one_launcher_link_for_this_patient(egfrs):
+    card = client.post(URL, json=request_body(prefetch([T2D, CKD3], egfrs))).json()["cards"][0]
+    links = evidence_links(card)
+    assert len(links) == 1 and links[0]["type"] == "absolute"
+    url = urlparse(links[0]["url"])
+    assert f"{url.scheme}://{url.netloc}{url.path}" == cds_service.LAUNCHER_URL
+    q = {k: v[0] for k, v in parse_qs(url.query).items()}
+    assert q == {
+        "launch_uri": cds_service.APP_LAUNCH_URL,
+        "fhir_server": cds_service.FHIR_FOR_LAUNCHER,
+        "fhir_ver": "4",
+        "patient": PID,
+    }
+
+
+def test_card_keeps_guideline_link():
+    card = client.post(URL, json=request_body(prefetch([T2D, CKD3], [egfr(41, 30)]))).json()["cards"][0]
+    assert any(l["url"] == cds_service.GUIDELINE_URL for l in card["links"])
+
+
+def test_smart_mode_link_has_no_patient_in_url(monkeypatch):
+    monkeypatch.setattr(cds_service, "EVIDENCE_LINK_MODE", "smart")
+    card = client.post(URL, json=request_body(prefetch([T2D, CKD3], [egfr(41, 30)]))).json()["cards"][0]
+    (link,) = evidence_links(card)
+    assert link == {"label": cds_service.EVIDENCE_LABEL, "url": cds_service.APP_LAUNCH_URL, "type": "smart"}
+    assert PID not in link["url"]
