@@ -8,6 +8,10 @@ spec asks for:
   POST /cds-services/sglt2-t2d-ckd   the hook call: patient context in,
                                      suggestion cards out
 
+and, for the Phase 5 SMART evidence app:
+
+  POST /evidence/sglt2-t2d-ckd       the full evaluate() result for a prefetch
+
 Run it:
   python -m uvicorn cds_service:app --reload --port 8000
 
@@ -15,6 +19,8 @@ Prefetch and the fallback fetch both produce (patient, resources): a Patient
 dict and one flat list of Condition, Observation, MedicationRequest and
 Medication dicts. to_patient_data() sorts that list into the arguments
 guideline.build_patient_data() already takes, so Phase 3 code is unchanged.
+evaluate_prefetch() is the one path from prefetch to a Result; the hook and
+/evidence both use it, so the card and the app can't disagree.
 """
 from __future__ import annotations
 
@@ -24,7 +30,8 @@ from datetime import date
 from typing import Any
 
 import requests
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
@@ -179,6 +186,30 @@ def to_patient_data(patient: dict, resources: list[dict]) -> guideline.PatientDa
     )
 
 
+# ---------------------------------------------------------------- evaluation
+
+
+def as_of() -> date:
+    """The date every evaluation uses. Change it here only (Phase 4, Step 4)."""
+    return date.today()
+
+
+def evaluate_resources(patient: dict, resources: list[dict]) -> guideline.Result:
+    """Layers 2 and 3: a Patient and its resources in, a guideline Result out."""
+    return guideline.evaluate(to_patient_data(patient, resources), as_of())
+
+
+def evaluate_prefetch(prefetch: dict[str, Any] | None) -> guideline.Result | None:
+    """Return a Result, or None if prefetch is incomplete (C1).
+
+    Used by the hook handler AND /evidence, so they can't disagree.
+    """
+    data_in = from_prefetch(prefetch)
+    if data_in is None:
+        return None
+    return evaluate_resources(*data_in)
+
+
 # ---------------------------------------------------------------- cards out
 
 
@@ -252,19 +283,17 @@ async def call_service(service_id: str, request: Request) -> dict[str, Any]:
              "present" if request.headers.get("authorization") else "absent")
 
     try:
-        data_in = from_prefetch(body.get("prefetch"))
+        result = evaluate_prefetch(body.get("prefetch"))
         source = "prefetch"
-        if data_in is None:
+        if result is None:  # C1: incomplete prefetch, fetch it ourselves
             base = body.get("fhirServer")
             if not base:
                 log.warning("instance=%s incomplete prefetch and no fhirServer", hook_instance)
                 return {"cards": []}
             token = (body.get("fhirAuthorization") or {}).get("access_token")
-            data_in = await run_in_threadpool(from_fhir_server, base, patient_id, token)
+            patient, resources = await run_in_threadpool(from_fhir_server, base, patient_id, token)
+            result = evaluate_resources(patient, resources)
             source = "fhirServer"
-        patient, resources = data_in
-        data = to_patient_data(patient, resources)
-        result = guideline.evaluate(data, date.today())
     except Exception:  # C7: never break the EHR screen; log and stay silent
         log.exception("instance=%s evaluation failed", hook_instance)
         return {"cards": []}
@@ -273,3 +302,37 @@ async def call_service(service_id: str, request: Request) -> dict[str, Any]:
     log.info("instance=%s source=%s status=%s", hook_instance, source, _status(result))
     return {"cards": cards_for(result)}
 
+
+# ---------------------------------------------------------------- evidence (Phase 5)
+
+
+@app.post("/evidence/{service_id}")
+def evidence(service_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """The full evaluate() result for the SMART evidence app (S3, S4, S7).
+
+    Takes the same prefetch dict as the hook, built by the app with its own
+    token. No fhirServer fallback: if the data is incomplete, say so (422)
+    rather than fetch more on the app's behalf. Lives outside /cds-services
+    because that path belongs to the CDS Hooks spec.
+    """
+    if service_id != SERVICE_ID:
+        raise HTTPException(status_code=404, detail=f"Unknown service {service_id}")
+    try:
+        result = evaluate_prefetch(body.get("prefetch"))
+    except Exception:
+        log.exception("evidence: evaluation failed")
+        raise HTTPException(status_code=500, detail="Evaluation failed. See the service log.")
+    if result is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Incomplete data: a query is missing or has more pages. Nothing was evaluated.",
+        )
+    # As with the hook: log the status, not the reasons.
+    log.info("evidence: status=%s", _status(result))
+    return {
+        "status": _status(result),
+        "reasons": list(result.reasons or []),
+        "facts": jsonable_encoder(result.facts),
+        "as_of": as_of().isoformat(),
+        "reviewed": CLINICIAN_REVIEWED,
+    }

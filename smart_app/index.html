@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SGLT2 evidence</title>
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient@2.6.3/build/fhir-client.min.js"></script>
+  <script src="config.js"></script>
+  <style>
+    body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1d2330; }
+    main { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 0 0 8px; }
+    .muted { color: #5b6475; }
+    .panel { background: #fff; border: 1px solid #dde1e8; border-radius: 8px; padding: 14px 16px; margin-top: 14px; }
+    .status { font-weight: 600; font-size: 17px; }
+    .RECOMMEND { border-left: 5px solid #2f7d4f; }
+    .INSUFFICIENT_DATA { border-left: 5px solid #b7791f; }
+    .NOT_APPLICABLE { border-left: 5px solid #8a93a6; }
+    .warn { background: #fff8e6; border-color: #e7c66b; }
+    .error { background: #fdecec; border-color: #e3a0a0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid #eef0f4; }
+    svg text { font-size: 11px; fill: #5b6475; }
+    pre { white-space: pre-wrap; font-size: 12px; margin: 0; }
+    .muted, td { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main id="app"><p class="muted">Loading patient data…</p></main>
+  <script src="app.js"></script>
+</body>
+</html>
