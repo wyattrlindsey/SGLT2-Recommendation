@@ -28,6 +28,7 @@ import logging
 import uuid
 from datetime import date
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -51,6 +52,17 @@ GUIDELINE_URL = (
 # C6: criteria.md has not had clinician sign-off (Phase 3, Step 7 deferred).
 # While this is False every card says so, and no card offers an order.
 CLINICIAN_REVIEWED = False
+
+# S2: how the card opens the Phase 5 evidence app.
+#   "launcher": an absolute link to the SMART launcher's /remote-launch, which
+#               plays the EHR's launch step. Needed because the CDS Hooks sandbox
+#               can only launch "smart" links against a SMART-enabled FHIR server.
+#   "smart":    a real CDS Hooks SMART link. The EHR adds iss and launch itself.
+EVIDENCE_LINK_MODE = "launcher"
+APP_LAUNCH_URL = "http://localhost:8001/launch.html"
+LAUNCHER_URL = "http://localhost:9000/remote-launch"
+FHIR_FOR_LAUNCHER = "http://host.docker.internal:8080/fhir"  # HAPI as seen from inside Docker
+EVIDENCE_LABEL = "Review the evidence"
 
 SUMMARY_MAX = 140  # CDS Hooks: card summary must be under 140 characters
 FETCH_TIMEOUT = 10  # seconds, for the fallback FHIR queries
@@ -229,18 +241,35 @@ def _detail(reasons: list[str], intro: str) -> str:
     return "\n".join(lines)
 
 
-def _card(summary: str, detail: str, indicator: str) -> dict[str, Any]:
+def evidence_link(patient_id: str) -> dict[str, str]:
+    """S1, S2: the card link that opens the SMART evidence app for this patient."""
+    if EVIDENCE_LINK_MODE == "smart":
+        # The EHR supplies the patient through the launch context, not the URL.
+        return {"label": EVIDENCE_LABEL, "url": APP_LAUNCH_URL, "type": "smart"}
+    query = urlencode({
+        "launch_uri": APP_LAUNCH_URL,
+        "fhir_server": FHIR_FOR_LAUNCHER,
+        "fhir_ver": 4,
+        "patient": patient_id,
+    })
+    return {"label": EVIDENCE_LABEL, "url": f"{LAUNCHER_URL}?{query}", "type": "absolute"}
+
+
+def _card(summary: str, detail: str, indicator: str, patient_id: str) -> dict[str, Any]:
     return {
         "uuid": str(uuid.uuid4()),
         "summary": _short(summary),
         "detail": detail,
         "indicator": indicator,
         "source": {"label": GUIDELINE_LABEL, "url": GUIDELINE_URL},
-        "links": [{"label": "ADA Standards of Care, Section 11", "url": GUIDELINE_URL, "type": "absolute"}],
+        "links": [
+            evidence_link(patient_id),
+            {"label": "ADA Standards of Care, Section 11", "url": GUIDELINE_URL, "type": "absolute"},
+        ],
     }
 
 
-def cards_for(result: Any) -> list[dict[str, Any]]:
+def cards_for(result: Any, patient_id: str) -> list[dict[str, Any]]:
     """C2-C4: one card for RECOMMEND, one for INSUFFICIENT_DATA, silence otherwise."""
     status = _status(result)
     reasons = list(getattr(result, "reasons", []) or [])
@@ -250,6 +279,7 @@ def cards_for(result: Any) -> list[dict[str, Any]]:
                 "Consider an SGLT2 inhibitor: type 2 diabetes with CKD, eGFR ≥ 20 (ADA 11.7a)",
                 _detail(reasons, "This patient meets ADA 11.7a for starting an SGLT2 inhibitor:"),
                 "info",
+                patient_id,
             )
         ]
     if status == "INSUFFICIENT_DATA":
@@ -260,6 +290,7 @@ def cards_for(result: Any) -> list[dict[str, Any]]:
                 f"SGLT2 inhibitor eligibility unclear: {missing}",
                 _detail(reasons, "ADA 11.7a may apply, but the record is missing what the rule needs:"),
                 "info",
+                patient_id,
             )
         ]
     return []
@@ -300,7 +331,7 @@ async def call_service(service_id: str, request: Request) -> dict[str, Any]:
 
     # Log the status, not the reasons: reasons contain clinical details.
     log.info("instance=%s source=%s status=%s", hook_instance, source, _status(result))
-    return {"cards": cards_for(result)}
+    return {"cards": cards_for(result, patient_id)}
 
 
 # ---------------------------------------------------------------- evidence (Phase 5)
