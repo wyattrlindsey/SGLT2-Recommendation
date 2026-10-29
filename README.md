@@ -126,7 +126,7 @@ To run the whole thing against synthetic patients:
 2. Download `synthea-with-dependencies.jar` from the [Synthea setup page](https://github.com/synthetichealth/synthea/wiki/Basic-Setup-and-Running) into the repo folder, generate patients, and load them:
 
    ```bash
-   java -jar synthea-with-dependencies.jar -s 42 -p 15 -a 40-80 Massachusetts
+   java -jar synthea-with-dependencies.jar -s 42 -p 200 -a 40-80 Massachusetts
    python load_synthea.py --dir ./output/fhir --base http://localhost:8080/fhir
    ```
 
