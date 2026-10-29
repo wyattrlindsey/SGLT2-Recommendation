@@ -164,7 +164,7 @@ To stop and restart the FHIR server without losing data, use `docker compose sto
 Generated data is not committed. Running Synthea with the same seed recreates the same patients:
 
 ```bash
-java -jar synthea-with-dependencies.jar -s 42 -p 15 -a 40-80 Massachusetts
+java -jar synthea-with-dependencies.jar -s 42 -p 200 -a 40-80 Massachusetts
 ```
 
 If you change the seed, population size, or age range, update the command here so others can reproduce your data.
