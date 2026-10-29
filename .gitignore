@@ -19,3 +19,5 @@ egfr.json
 meds.json
 patient.json
 review.json
+# Loader output (load_synthea.py writes failures here)
+*.log
